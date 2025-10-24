@@ -1,6 +1,20 @@
 # [Piano Staircase](https://boffinfactory.github.io/PianoStaircase/)
 
-A Boffin build project.
+
+
+<p align="center">
+  <a href="https://boffinfactory.github.io/PianoStaircase">
+    <img src="./media/goob.jpg" alt="Goob" width="400" height="370">
+  </a>
+</p>
+
+<h3 align="center"><strong>Piano Staircase</strong></h3>
+
+<p align="center">
+  A Boffin build project.
+  <br>
+</p>
+
 
 [boffinfactory.github.io/PianoStaircase](https://boffinfactory.github.io/PianoStaircase/)
 
