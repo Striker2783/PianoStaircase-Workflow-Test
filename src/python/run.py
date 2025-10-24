@@ -24,13 +24,16 @@ def setup():
         serial2 = mapped.get(serial_numbers[i])
         if serial2 is None:
             serial_communicators.append(None)
-        serial_communicators.append(Port(i, port.name))
+        serial_communicators.append(Port(i, serial2))
 
 
 def get_distance(input):
     voltage = input * (5.0 / 1023.0)
-    dist = 15.0 * pow(voltage, -1.1)
-    return dist
+    try:
+        dist = 15.0 * pow(voltage, -1.1)
+        return dist
+    except ZeroDivisionError:
+        return 0
 
 
 def handle_line(line, serial):
