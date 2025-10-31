@@ -29,8 +29,8 @@ jobs:
       - name: Check formatting and linting with Ruff
         run: |
           # Ruff covers Black-like formatting, linting, and import sorting
-          ruff check . --output-format=github
-          ruff format --check .
+          ruff check . --output-format=github --exclude archive
+          ruff format --check . --exclude archive
 
       # --- Pylint: deeper static analysis ---
       - name: Lint code with Pylint
