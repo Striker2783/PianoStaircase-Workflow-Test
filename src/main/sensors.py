@@ -58,7 +58,7 @@ class MultiCallbackReader(LineReader):
 
 
 # --- Utility functions ---
-def get_serial_ports_by_serial_number() -> Dict[str, str]:
+def _get_serial_ports_by_serial_number() -> Dict[str, str]:
     """Return mapping: serial_number → device path."""
     ports = serial.tools.list_ports.comports()
     return {p.serial_number: p.device for p in ports if p.serial_number}
@@ -72,11 +72,11 @@ class SerialDeviceInfo(TypedDict):
     index: int
 
 
-def initialize_serial_devices(
+def _initialize_serial_devices(
     configs: List[SerialDeviceConfig],
 ) -> Dict[int, SerialDeviceInfo]:
     """Initialize serial devices and start threaded readers."""
-    serial_map = get_serial_ports_by_serial_number()
+    serial_map = _get_serial_ports_by_serial_number()
     devices: Dict[int, SerialDeviceInfo] = {}
 
     for idx, cfg in enumerate(configs):
@@ -122,4 +122,4 @@ def shutdown():
         dev["serial"].close()
 
 
-SERIAL_DEVICES = initialize_serial_devices(BASIC_SENSOR_CONFIGURATION)
+SERIAL_DEVICES = _initialize_serial_devices(BASIC_SENSOR_CONFIGURATION)
