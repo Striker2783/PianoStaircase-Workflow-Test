@@ -10,16 +10,18 @@ def get_distance(input):
         return 0
 
 
-def handle_line(line, info: sensors.SerialDeviceInfo):
+def handle_line(line, info: sensors.SerialDeviceConfig):
     dist = get_distance(int(line))
     print(f"Distance: {dist:.4f} cm by {info['name']}")
 
 
 try:
-    for i, serial in sensors.SERIAL_DEVICES.items():
-        serial["protocol"].add_callback(handle_line)
+    for i, serial in sensors.SERIAL_MANAGERS.items():
+        serial.callbacks.add_callback(handle_line)
+
     while True:
         pass
+
 except KeyboardInterrupt:
     print("Terminated...")
 finally:

@@ -2,8 +2,9 @@ from __future__ import annotations
 import serial
 import serial.tools.list_ports
 from serial.threaded import LineReader, ReaderThread
-from typing import Callable, Dict, List, Set, TypedDict
-
+from typing import Callable, Dict, List, Set, TypedDict, Optional
+import threading
+import time
 
 BASIC_SENSOR_CONFIGURATION: List[SerialDeviceConfig] = [
     {"serial_number": "74134373633351D09221", "baudrate": 9600, "name": "Step1"},
@@ -22,20 +23,20 @@ class SerialDeviceConfig(TypedDict):
 class MultiCallbackReader(LineReader):
     TERMINATOR = b"\n"
 
-    def __init__(self, info: SerialDeviceInfo) -> None:
+    def __init__(self, info: SerialManager) -> None:
         super().__init__()
-        self.callbacks: Set[Callable[[str, SerialDeviceInfo], None]] = set()
+        self.callbacks: Set[Callable[[str, SerialManager], None]] = set()
         self.info = info
 
-    def set_serial_device_info(self, info: SerialDeviceInfo):
+    def set_serial_device_info(self, info: SerialManager):
         self.info = info
 
-    def add_callback(self, func: Callable[[str, SerialDeviceInfo], None]) -> None:
+    def add_callback(self, func: Callable[[str, SerialManager], None]) -> None:
         """Register a new callback (must accept a single str argument)."""
         if callable(func):
             self.callbacks.add(func)
 
-    def remove_callback(self, func: Callable[[str, SerialDeviceInfo], None]) -> None:
+    def remove_callback(self, func: Callable[[str, SerialManager], None]) -> None:
         """Unregister a previously added callback."""
         self.callbacks.discard(func)
 
@@ -57,69 +58,79 @@ class MultiCallbackReader(LineReader):
             self.on_disconnect(exc)
 
 
-# --- Utility functions ---
-def _get_serial_ports_by_serial_number() -> Dict[str, str]:
-    """Return mapping: serial_number → device path."""
-    ports = serial.tools.list_ports.comports()
-    return {p.serial_number: p.device for p in ports if p.serial_number}
+def find_port_by_serial(serial_number: str) -> Optional[str]:
+    for p in serial.tools.list_ports.comports():
+        if p.serial_number == serial_number:
+            return p.device
+    return None
 
 
-class SerialDeviceInfo(TypedDict):
-    name: str
-    serial: serial.Serial
-    reader: ReaderThread
-    protocol: MultiCallbackReader
-    index: int
+class SerialManager:
+    def __init__(self, config: SerialDeviceConfig, idx: int):
+        self.config = config
+        self.index = idx
+        self.thread: Optional[ReaderThread] = None
+        self.ser: Optional[serial.Serial] = None
+        self.callbacks = MultiCallbackReader(self)
+        self.stop_event = threading.Event()
+
+    def start(self):
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        found_prev = False
+        while not self.stop_event.is_set():
+            port = find_port_by_serial(self.config["serial_number"])
+            if not port:
+                if not found_prev:
+                    print(f"Could not find {self.config['name']}")
+                    found_prev = True
+                time.sleep(2)
+                continue
+            found_prev = False
+
+            try:
+                print(f"Connecting to {port}")
+                self.ser = serial.Serial(port, self.config["baudrate"], timeout=1)
+                with ReaderThread(self.ser, self.callbacks) as self.thread:
+                    while not self.stop_event.is_set():
+                        time.sleep(0.5)
+            except (serial.SerialException, OSError) as e:
+                print(f"Serial error {self.config['name']}: {e}")
+            finally:
+                if self.ser and self.ser.is_open:
+                    try:
+                        self.ser.close()
+                    except Exception:
+                        pass
+                print(f"Reconnecting {self.config['name']}")
+
+    def stop(self):
+        self.stop_event.set()
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+        print(f"Serial manager {self.config['name']} stopped.")
 
 
-def _initialize_serial_devices(
+def _initialize_serial_managers(
     configs: List[SerialDeviceConfig],
-) -> Dict[int, SerialDeviceInfo]:
+) -> Dict[int, SerialManager]:
     """Initialize serial devices and start threaded readers."""
-    serial_map = _get_serial_ports_by_serial_number()
-    devices: Dict[int, SerialDeviceInfo] = {}
+    devices: Dict[int, SerialManager] = {}
 
     for idx, cfg in enumerate(configs):
-        sn = cfg["serial_number"]
-        baud = cfg["baudrate"]
-        name = cfg["name"]
-
-        if sn not in serial_map:
-            print(f"Device {idx} ({name}, S/N {sn}) not found.")
-            continue
-
-        port = serial_map[sn]
-        try:
-            ser = serial.Serial(port, baudrate=baud, timeout=1)
-            protocol = MultiCallbackReader()
-            thread = ReaderThread(ser, lambda: protocol)
-
-            devices[idx] = {
-                "name": name,
-                "serial": ser,
-                "reader": thread,
-                "protocol": protocol,
-                "index": idx,
-            }
-
-            protocol.set_serial_device_info(devices[idx])
-            thread.start()
-            thread.connect()
-
-        except serial.SerialException as e:
-            print(f"Could not open [{idx}] {name} ({port}): {e}")
+        serial_manager = SerialManager(cfg, idx)
+        devices[idx] = serial_manager
+        serial_manager.start()
 
     return devices
 
 
 def shutdown():
-    global SERIAL_DEVICES
-    print("\nClearing callbacks and closing connections...")
-    for dev in SERIAL_DEVICES.values():
-        proto = dev["protocol"]
-        proto.clear_callbacks()
-        dev["reader"].close()
-        dev["serial"].close()
+    global SERIAL_MANAGERS
+    print("Clearing callbacks and closing connections...")
+    for dev in SERIAL_MANAGERS.values():
+        dev.stop()
 
 
-SERIAL_DEVICES = _initialize_serial_devices(BASIC_SENSOR_CONFIGURATION)
+SERIAL_MANAGERS = _initialize_serial_managers(BASIC_SENSOR_CONFIGURATION)
