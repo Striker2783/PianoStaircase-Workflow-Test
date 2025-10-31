@@ -1,90 +1,125 @@
+from __future__ import annotations
 import serial
 import serial.tools.list_ports
-import serial.threaded
-import typing
+from serial.threaded import LineReader, ReaderThread
+from typing import Callable, Dict, List, Set, TypedDict
 
 
-BASIC_SENSOR_CONFIGURATION = [
+BASIC_SENSOR_CONFIGURATION: List[SerialDeviceConfig] = [
     {"serial_number": "74134373633351D09221", "baudrate": 9600, "name": "Step1"},
     {"serial_number": "D2CC78A7249375CD4E42", "baudrate": 9600, "name": "Step2"},
 ]
 
 
-class Config:
-    def __init__(self, basic_config, index, port):
-        self.index = index
-        self.serial_number = basic_config.serial_number
-        self.baudrate = basic_config.baudrate
-        self.name = basic_config.name
-        self.port = port
+# --- Configuration type ---
+class SerialDeviceConfig(TypedDict):
+    serial_number: str
+    baudrate: int
+    name: str
 
 
-sensor_configuration: typing.Dict[int, Config] = {}
+# --- Custom LineReader with multiple removable callbacks ---
+class MultiCallbackReader(LineReader):
+    TERMINATOR = b"\n"
 
-
-def setup():
-    """Setups the sensors configuration."""
-    global BASIC_SENSOR_CONFIGURATION, sensor_configuration
-    ports = serial.tools.list_ports.comports()
-    mapped = dict()
-    for port in ports:
-        if port.serial_number is None:
-            continue
-        mapped[port.serial_number] = port.device
-    for i in range(len(BASIC_SENSOR_CONFIGURATION)):
-        port = mapped.get(BASIC_SENSOR_CONFIGURATION[i]["serial_number"])
-        if port is None:
-            continue
-        sensor_configuration[i] = Config(BASIC_SENSOR_CONFIGURATION[i], i, port)
-    setup_serial()
-
-
-serial_devices: typing.Dict[int, serial.Serial] = dict()
-
-
-class SerialListener(serial.threaded.LineReader):
-    def __init__(self, index):
+    def __init__(self, info: SerialDeviceInfo) -> None:
         super().__init__()
-        self.index = index
-        self.listeners = {}
+        self.callbacks: Set[Callable[[str, SerialDeviceInfo], None]] = set()
+        self.info = info
 
-    def handle_line(self, line):
-        for listener in self.listeners.keys():
-            listener(line, self.index)
+    def set_serial_device_info(self, info: SerialDeviceInfo):
+        self.info = info
 
-    def addListener(self, callback):
-        self.listeners[callback] = True
+    def add_callback(self, func: Callable[[str, SerialDeviceInfo], None]) -> None:
+        """Register a new callback (must accept a single str argument)."""
+        if callable(func):
+            self.callbacks.add(func)
 
-    def removeListener(self, callback):
-        self.listeners.pop(callback)
+    def remove_callback(self, func: Callable[[str, SerialDeviceInfo], None]) -> None:
+        """Unregister a previously added callback."""
+        self.callbacks.discard(func)
+
+    def clear_callbacks(self) -> None:
+        """Remove all callbacks."""
+        self.callbacks.clear()
+
+    def handle_line(self, line: str) -> None:
+        """Dispatch received lines to all registered callbacks."""
+        for cb in list(self.callbacks):
+            try:
+                cb(line, self.info)
+            except Exception as e:
+                print(f"Callback error: {e}")
+
+    def handle_exception(self, exc: Exception):
+        print("⚠️ Serial error:", exc)
+        if self.on_disconnect:
+            self.on_disconnect(exc)
 
 
-reader_threads: typing.Dict[int, serial.threaded.ReaderThread] = dict()
-serial_listeners: typing.Dict[int, SerialListener] = dict()
+# --- Utility functions ---
+def get_serial_ports_by_serial_number() -> Dict[str, str]:
+    """Return mapping: serial_number → device path."""
+    ports = serial.tools.list_ports.comports()
+    return {p.serial_number: p.device for p in ports if p.serial_number}
 
 
-def setup_serial():
-    global serial_devices, sensor_configuration
-    for i, config in sensor_configuration.items():
-        serial_devices[i] = serial.Serial(
-            port=config.port, baudrate=config.baudrate, timeout=2
-        )
-    for i, serial_device in serial_devices.items():
+class SerialDeviceInfo(TypedDict):
+    name: str
+    serial: serial.Serial
+    reader: ReaderThread
+    protocol: MultiCallbackReader
+    index: int
 
-        def factory():
-            serial_listener = SerialListener(i)
-            serial_listeners[i] = serial_listener
-            return serial_listener
 
-        reader_threads[i] = serial.threaded.ReaderThread(serial_device, factory)
-        reader_threads[i].start()
+def initialize_serial_devices(
+    configs: List[SerialDeviceConfig],
+) -> Dict[int, SerialDeviceInfo]:
+    """Initialize serial devices and start threaded readers."""
+    serial_map = get_serial_ports_by_serial_number()
+    devices: Dict[int, SerialDeviceInfo] = {}
+
+    for idx, cfg in enumerate(configs):
+        sn = cfg["serial_number"]
+        baud = cfg["baudrate"]
+        name = cfg["name"]
+
+        if sn not in serial_map:
+            print(f"Device {idx} ({name}, S/N {sn}) not found.")
+            continue
+
+        port = serial_map[sn]
+        try:
+            ser = serial.Serial(port, baudrate=baud, timeout=1)
+            protocol = MultiCallbackReader()
+            thread = ReaderThread(ser, lambda: protocol)
+
+            devices[idx] = {
+                "name": name,
+                "serial": ser,
+                "reader": thread,
+                "protocol": protocol,
+                "index": idx,
+            }
+
+            protocol.set_serial_device_info(devices[idx])
+            thread.start()
+            thread.connect()
+
+        except serial.SerialException as e:
+            print(f"Could not open [{idx}] {name} ({port}): {e}")
+
+    return devices
 
 
 def shutdown():
-    for _, reader_thread in reader_threads.items():
-        if reader_thread is None:
-            continue
-        reader_thread.stop()
+    global SERIAL_DEVICES
+    print("\nClearing callbacks and closing connections...")
+    for dev in SERIAL_DEVICES.values():
+        proto = dev["protocol"]
+        proto.clear_callbacks()
+        dev["reader"].close()
+        dev["serial"].close()
 
 
-setup()
+SERIAL_DEVICES = initialize_serial_devices(BASIC_SENSOR_CONFIGURATION)
