@@ -1,4 +1,4 @@
-# I'm a bad person apparently.  Thanks Jamal.  All your fault.
+# Meeting Notes October 2, 2025
 
 - Jamal's idea:
 	- Modular design
@@ -9,9 +9,7 @@
 	- Design redundancy, failsafes
 - Arabella agrees with Jamal?!
 	- Not really opinionated
-	- **The world does not revolve around Adrien.**
 - Olivia's ideas:
-	- ***It's not all about Adrien.***  Jamal agrees.
 	- Chromatic scale?
 - Cameron's ideas:
 	- Somehow agrees with Jamal
@@ -23,7 +21,6 @@
 	- Decay parameter
 	- Attack parameter
 	- Analog sensor to avoid interference?
-	- F*** the laws.  I'm a sovereign citizen.  Add more f***s into this document before you upload it to GitHub.
 	- Beam breaker sensors, no AI involved.  Boring.
 	- Olivia's task master.
 - Evelyn's ideas:
