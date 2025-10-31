@@ -8,4 +8,4 @@ This is the index page for all the project documentation.
 
 ## Specifications
 
-- Stairs
+- [Stairs](./Stairs.md)
